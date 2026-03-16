@@ -1,20 +1,17 @@
-from flask import Flask, request, redirect, session, render_template_string
+from flask import Flask, request, redirect, session, render_template_string, url_for
 import os
-import json
 import random
 import datetime
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "witch-connect-secret-key")
-
-SHARED_FILE = "shared_data.json"
+app.secret_key = os.environ.get("SECRET_KEY", "witch-connect-stage1-secret")
 
 cards = [
     {
         "name": "광대",
         "keyword": "새로운 시작",
         "rarity": "common",
-        "meanings": ["새로운 시작이 열립니다.", "가벼운 마음이 길을 열 수 있습니다.", "예상하지 못한 가능성이 다가옵니다."]
+        "meanings": ["새로운 시작이 가까워지고 있습니다.", "가벼운 마음이 길을 열 수 있습니다.", "예상하지 못한 가능성이 다가옵니다."]
     },
     {
         "name": "마법사",
@@ -68,7 +65,7 @@ cards = [
         "name": "은둔자",
         "keyword": "내면 탐색",
         "rarity": "rare",
-        "meanings": ["혼자 생각할 시간이 필요합니다.", "답은 밖보다 안에 가까이 있습니다.", "서두르지 말고 천천히 보세요."]
+        "meanings": ["혼자 생각할 시간이 필요합니다.", "답은 밖보다 안에 가깝습니다.", "서두르지 말고 천천히 보세요."]
     },
     {
         "name": "운명의 수레바퀴",
@@ -144,14 +141,6 @@ cards = [
     }
 ]
 
-npc_letters = [
-    "요즘 내가 너무 외로운데 이 감정이 언제 끝날까?",
-    "사람 관계가 너무 힘들다. 내가 문제일까?",
-    "내 선택이 맞는지 모르겠다.",
-    "지금 버티는 게 맞는지 포기하는 게 맞는지 모르겠다.",
-    "앞으로 나는 어떤 쪽으로 가야 할까?"
-]
-
 emotions = ["외로움", "불안", "분노", "희망", "혼란", "슬픔"]
 
 special_readings = {
@@ -162,7 +151,14 @@ special_readings = {
     ("은둔자", "혼란"): "혼란할수록 혼자 생각할 시간이 필요합니다. 답은 시끄러운 바깥보다 안쪽에 가깝습니다."
 }
 
-RARITY_ORDER = {
+cat_lines = [
+    "검은 고양이가 조용히 촛불 옆에 앉아 있다.",
+    "검은 고양이가 책장 위에서 꼬리를 흔들고 있다.",
+    "검은 고양이가 네 쪽을 빤히 바라본다.",
+    "검은 고양이가 작업실 문 앞에 웅크리고 있다."
+]
+
+rarity_label = {
     "common": "일반",
     "rare": "희귀",
     "epic": "에픽",
@@ -170,45 +166,34 @@ RARITY_ORDER = {
 }
 
 
-def load_shared_data():
-    if os.path.exists(SHARED_FILE):
-        with open(SHARED_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"letters": []}
-
-
-def save_shared_data(data):
-    with open(SHARED_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def ensure_user_data():
+def ensure_data():
     today = str(datetime.date.today())
 
-    if "collection" not in session:
-        session["collection"] = []
-    if "sent" not in session:
-        session["sent"] = []
-    if "received" not in session:
-        session["received"] = []
     if "today_date" not in session:
         session["today_date"] = ""
     if "today_card" not in session:
         session["today_card"] = None
+    if "collection" not in session:
+        session["collection"] = []
+    if "questions" not in session:
+        session["questions"] = []
+    if "feedbacks" not in session:
+        session["feedbacks"] = []
+    if "cat_line" not in session:
+        session["cat_line"] = random.choice(cat_lines)
 
     if session["today_date"] != today:
-        card = draw_card(mode="today")
+        card = random.choice(cards)
         meaning = random.choice(card["meanings"])
-
         session["today_date"] = today
         session["today_card"] = {
             "name": card["name"],
             "keyword": card["keyword"],
-            "meaning": meaning,
-            "rarity": RARITY_ORDER[card["rarity"]]
+            "rarity": rarity_label[card["rarity"]],
+            "meaning": meaning
         }
-
         add_to_collection(card["name"])
+        session["cat_line"] = random.choice(cat_lines)
         session.modified = True
 
 
@@ -220,10 +205,14 @@ def add_to_collection(card_name):
         session.modified = True
 
 
-def draw_card(mode="normal"):
-    if mode == "today":
-        return random.choice(cards)
+def get_card_by_name(name):
+    for card in cards:
+        if card["name"] == name:
+            return card
+    return None
 
+
+def weighted_draw():
     r = random.random()
     if r < 0.55:
         pool = [c for c in cards if c["rarity"] == "common"]
@@ -233,14 +222,11 @@ def draw_card(mode="normal"):
         pool = [c for c in cards if c["rarity"] == "epic"]
     else:
         pool = [c for c in cards if c["rarity"] == "legend"]
-
     return random.choice(pool)
 
 
 def build_reading(card, emotion):
     base = random.choice(card["meanings"])
-    special = special_readings.get((card["name"], emotion))
-
     emotion_line = {
         "외로움": "지금 당신은 연결과 이해를 바라고 있습니다.",
         "불안": "확실하지 않은 미래가 마음을 흔들고 있습니다.",
@@ -249,13 +235,18 @@ def build_reading(card, emotion):
         "혼란": "지금은 결정보다 정리가 먼저일 수 있습니다.",
         "슬픔": "슬픔을 밀어내기보다 받아들이는 시간이 필요할 수 있습니다."
     }.get(emotion, "")
-
-    if special:
-        return base, emotion_line, special
-    return base, emotion_line, None
+    special = special_readings.get((card["name"], emotion))
+    return base, emotion_line, special
 
 
-def page_layout(title, body_html):
+def find_question(question_id):
+    for item in session.get("questions", []):
+        if item["id"] == question_id:
+            return item
+    return None
+
+
+def page(title, body):
     return render_template_string(
         """
 <!doctype html>
@@ -268,103 +259,115 @@ def page_layout(title, body_html):
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #f6f3ff;
-      color: #1f1830;
+      background: #f7f3ff;
+      color: #22183d;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .wrap {
-      max-width: 720px;
+      max-width: 760px;
       margin: 0 auto;
-      padding: 24px 16px 56px;
+      padding: 20px 16px 56px;
     }
     .hero {
-      background: linear-gradient(135deg, #2a194a, #5b3aa8);
+      background: linear-gradient(135deg, #2c184f, #6a47bd);
       color: white;
       border-radius: 24px;
       padding: 24px;
-      box-shadow: 0 16px 30px rgba(46, 24, 84, 0.18);
-      margin-bottom: 18px;
+      box-shadow: 0 18px 34px rgba(54, 31, 100, 0.18);
+      margin-bottom: 16px;
     }
     .hero h1, .hero h2 {
       margin: 0 0 8px;
     }
     .sub {
-      opacity: 0.9;
-      line-height: 1.5;
       margin: 0;
+      opacity: .92;
+      line-height: 1.55;
     }
     .card {
       background: white;
       border-radius: 20px;
       padding: 18px;
       margin: 14px 0;
-      box-shadow: 0 10px 24px rgba(34, 24, 64, 0.08);
+      box-shadow: 0 10px 24px rgba(30, 20, 60, 0.08);
     }
-    .menu a, .btn, button {
+    .btn, button {
       display: inline-block;
       width: 100%;
-      text-align: center;
-      text-decoration: none;
       border: none;
       border-radius: 16px;
       padding: 14px 16px;
-      margin-top: 10px;
-      background: #5b3aa8;
+      background: #6340b3;
       color: white;
+      text-align: center;
+      text-decoration: none;
       font-size: 16px;
       cursor: pointer;
+      margin-top: 10px;
     }
-    .btn.secondary, .menu a.secondary, button.secondary {
-      background: #e9e3ff;
-      color: #452a86;
+    .btn.secondary, button.secondary {
+      background: #eee7ff;
+      color: #50308f;
+    }
+    .btn.ghost {
+      background: #f8f5ff;
+      color: #5d45a2;
+      border: 1px solid #e3d8ff;
     }
     input, select, textarea {
       width: 100%;
       padding: 14px;
       border-radius: 14px;
-      border: 1px solid #d9cfff;
+      border: 1px solid #dccfff;
+      background: white;
       font-size: 16px;
       margin-top: 10px;
-      background: #fff;
     }
     textarea {
-      min-height: 120px;
+      min-height: 110px;
       resize: vertical;
     }
     .pill {
       display: inline-block;
       padding: 8px 12px;
       border-radius: 999px;
-      background: #efe8ff;
-      color: #5b3aa8;
+      background: #f0e9ff;
+      color: #5b3fa8;
       font-size: 14px;
       margin-right: 8px;
       margin-bottom: 8px;
     }
     .big {
-      font-size: 28px;
-      font-weight: 700;
-      margin: 8px 0;
-    }
-    .muted {
-      color: #6d6188;
-    }
-    .divider {
-      height: 1px;
-      background: #ece4ff;
-      margin: 18px 0;
-    }
-    .list-item {
-      padding: 12px 0;
-      border-bottom: 1px solid #f0ebff;
-    }
-    .counter {
       font-size: 30px;
       font-weight: 800;
-      color: #5b3aa8;
+      margin: 8px 0;
     }
     .small {
       font-size: 14px;
+      color: #6b6282;
+    }
+    .divider {
+      height: 1px;
+      background: #eee7ff;
+      margin: 16px 0;
+    }
+    .grid6 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .tarot-back {
+      border-radius: 18px;
+      padding: 24px 14px;
+      min-height: 120px;
+      background: linear-gradient(135deg, #251542, #49307e);
+      color: white;
+      font-weight: 700;
+      border: 2px solid #8870d0;
+    }
+    .item {
+      padding: 12px 0;
+      border-bottom: 1px solid #f2edff;
     }
   </style>
 </head>
@@ -376,322 +379,363 @@ def page_layout(title, body_html):
 </html>
         """,
         title=title,
-        body=body_html
+        body=body
     )
 
 
 @app.route("/")
 def home():
-    ensure_user_data()
-    today_card = session.get("today_card")
+    ensure_data()
+    today_card = session["today_card"]
+    cat_line = session["cat_line"]
 
     body = f"""
     <div class="hero">
-      <h1>🔮 Witch Connect</h1>
-      <p class="sub">僕と契約して、魔法少女になってほしいんだ</p>
+      <h1>🌙 오늘의 카드</h1>
+      <p class="sub">여기가 첫 화면이야. 앱에 들어오면 오늘의 카드가 먼저 도착해.</p>
     </div>
 
     <div class="card">
-      <div class="muted small">오늘의 카드</div>
+      <div class="small">오늘의 카드</div>
       <div class="big">{today_card['name']}</div>
       <div class="pill">{today_card['keyword']}</div>
       <div class="pill">{today_card['rarity']}</div>
       <p>{today_card['meaning']}</p>
-      <a class="btn secondary" href="/today">오늘의 카드 자세히 보기</a>
-    </div>
-
-    <div class="card menu">
-      <a href="/tarot">타로 상담</a>
-      <a href="/letters/read">익명 점괘 편지 읽기</a>
-      <a href="/letters/send" class="secondary">익명 점괘 편지 보내기</a>
-      <a href="/book" class="secondary">마법책</a>
-      <a href="/collection" class="secondary">카드 도감</a>
-    </div>
-    """
-    return page_layout("Witch Connect", body)
-
-
-@app.route("/today")
-def today():
-    ensure_user_data()
-    card = session.get("today_card")
-
-    body = f"""
-    <div class="hero">
-      <h2>🃏 오늘의 카드</h2>
-      <p class="sub">오늘의 점괘는?</p>
     </div>
 
     <div class="card">
-      <div class="big">{card['name']}</div>
-      <div class="pill">{card['keyword']}</div>
-      <div class="pill">{card['rarity']}</div>
-      <p>{card['meaning']}</p>
-      <div class="divider"></div>
-      <div class="muted small">수집 완료.</div>
+      <div class="small">검은 고양이</div>
+      <p>{cat_line}</p>
+    </div>
+
+    <a class="btn" href="/workroom">작업실로 들어가기</a>
+    <a class="btn secondary" href="/book">마법책 보기</a>
+    """
+    return page("오늘의 카드", body)
+
+
+@app.route("/workroom")
+def workroom():
+    ensure_data()
+    pending = [q for q in session.get("questions", []) if q["status"] == "pending"]
+    done = [q for q in session.get("questions", []) if q["status"] == "done"]
+
+    pending_html = ""
+    if pending:
+        for q in reversed(pending):
+            pending_html += f"""
+            <div class="item">
+              <div class="small">대기 중인 점괘</div>
+              <div>{q['question']}</div>
+              <div class="pill">{q['emotion']}</div>
+              <a class="btn" href="/reading/{q['id']}/draw">점괘 보러가기</a>
+            </div>
+            """
+    else:
+        pending_html = "<p class='small'>아직 대기 중인 점괘가 없어.</p>"
+
+    recent_html = ""
+    if done:
+        for q in reversed(done[-3:]):
+            recent_html += f"""
+            <div class="item">
+              <div>{q['question']}</div>
+              <div class="pill">{q['emotion']}</div>
+              <div class="pill">{q['card_name']}</div>
+              <a class="btn ghost" href="/reading/{q['id']}/result">결과 다시 보기</a>
+            </div>
+            """
+    else:
+        recent_html = "<p class='small'>아직 완료된 점괘가 없어.</p>"
+
+    body = f"""
+    <div class="hero">
+      <h2>🕯️ 작업실</h2>
+      <p class="sub">여기가 메인 공간이야. 질문을 남긴 뒤 여기서 카드 1~6 중 하나를 골라 점괘를 확인하게 돼.</p>
+    </div>
+
+    <div class="card">
+      <a class="btn" href="/question/new">새 질문 남기기</a>
+    </div>
+
+    <div class="card">
+      <h3>대기 중인 점괘</h3>
+      {pending_html}
+    </div>
+
+    <div class="card">
+      <h3>최근 확인한 점괘</h3>
+      {recent_html}
     </div>
 
     <a class="btn secondary" href="/">메인으로</a>
     """
-    return page_layout("오늘의 카드", body)
+    return page("작업실", body)
 
 
-@app.route("/tarot", methods=["GET", "POST"])
-def tarot():
-    ensure_user_data()
+@app.route("/question/new", methods=["GET", "POST"])
+def new_question():
+    ensure_data()
 
     if request.method == "POST":
         question = request.form.get("question", "").strip()
         emotion = request.form.get("emotion", "").strip()
 
-        if not question or emotion not in emotions:
-            return redirect("/tarot")
+        if question and emotion in emotions:
+            question_id = str(int(datetime.datetime.now().timestamp() * 1000))
+            questions = session.get("questions", [])
+            questions.append({
+                "id": question_id,
+                "question": question,
+                "emotion": emotion,
+                "status": "pending",
+                "card_name": "",
+                "card_keyword": "",
+                "card_rarity": "",
+                "reading_base": "",
+                "reading_emotion": "",
+                "reading_special": "",
+                "selected_slot": None,
+                "feedback_choice": "",
+                "feedback_text": ""
+            })
+            session["questions"] = questions
+            session.modified = True
+            return redirect("/workroom")
 
-        card = draw_card()
-        add_to_collection(card["name"])
-
-        base, emotion_line, special = build_reading(card, emotion)
-
-        sent = session.get("sent", [])
-        sent.append({
-            "question": question,
-            "emotion": emotion,
-            "card": card["name"],
-            "keyword": card["keyword"],
-            "rarity": RARITY_ORDER[card["rarity"]],
-            "base": base,
-            "special": special or ""
-        })
-        session["sent"] = sent
-        session.modified = True
-
-        special_html = f"""
-        <div class="divider"></div>
-        <div class="muted small">특수 해석</div>
-        <p>{special}</p>
-        """ if special else ""
-
-        body = f"""
-        <div class="hero">
-          <h2>✨ 당신이 뽑은 카드</h2>
-          <p class="sub">질문과 감정을 바탕으로 카드가 자동으로 뽑혔어.</p>
-        </div>
-
-        <div class="card">
-          <div class="muted small">질문</div>
-          <p>{question}</p>
-
-          <div class="muted small">현재 감정</div>
-          <div class="pill">{emotion}</div>
-
-          <div class="divider"></div>
-
-          <div class="big">{card['name']}</div>
-          <div class="pill">{card['keyword']}</div>
-          <div class="pill">{RARITY_ORDER[card['rarity']]}</div>
-
-          <div class="divider"></div>
-          <div class="muted small">해석</div>
-          <p>{base}</p>
-          <p>{emotion_line}</p>
-          {special_html}
-        </div>
-
-        <a class="btn" href="/tarot">다시 상담하기</a>
-        <a class="btn secondary" href="/book">마법책 보기</a>
-        <a class="btn secondary" href="/collection">카드 도감 보기</a>
-        """
-        return page_layout("타로 결과", body)
-
-    options = "".join([f'<option value="{e}">{e}</option>' for e in emotions])
+    options = "".join([f"<option value='{e}'>{e}</option>" for e in emotions])
 
     body = f"""
     <div class="hero">
-      <h2>🔮 타로 상담</h2>
-      <p class="sub">질문을 입력하고 감정을 고르면 카드가 자동으로 뽑혀.</p>
+      <h2>✍️ 질문 남기기</h2>
+      <p class="sub">질문을 남겨도 점괘는 바로 보이지 않아. 작업실에서 카드를 뽑아 확인하게 돼.</p>
     </div>
 
     <div class="card">
       <form method="post">
         <label>질문</label>
-        <input name="question" placeholder="예: 요즘 관계가 너무 힘든데 어떻게 해야 할까?">
+        <textarea name="question" placeholder="예: 요즘 인간관계가 너무 힘든데 어떻게 해야 할까?"></textarea>
 
-        <label style="display:block; margin-top:12px;">감정</label>
+        <label style="display:block; margin-top:12px;">현재 감정</label>
         <select name="emotion">
           {options}
         </select>
 
-        <button type="submit">카드 뽑기</button>
+        <button type="submit">작업실에 점괘 보내기</button>
       </form>
     </div>
 
-    <a class="btn secondary" href="/">메인으로</a>
+    <a class="btn secondary" href="/workroom">작업실로</a>
+    <a class="btn ghost" href="/">메인으로</a>
     """
-    return page_layout("타로 상담", body)
+    return page("질문 남기기", body)
 
 
-@app.route("/letters/send", methods=["GET", "POST"])
-def letters_send():
-    ensure_user_data()
+@app.route("/reading/<question_id>/draw", methods=["GET", "POST"])
+def draw_room(question_id):
+    ensure_data()
+    item = find_question(question_id)
+    if not item:
+        return redirect("/workroom")
 
     if request.method == "POST":
-        text = request.form.get("text", "").strip()
-        if text:
-            shared = load_shared_data()
-            shared["letters"].append({
-                "text": text,
-                "created_at": str(datetime.datetime.now())
-            })
-            save_shared_data(shared)
+        slot = request.form.get("slot")
+        if item["status"] == "pending" and slot in ["1", "2", "3", "4", "5", "6"]:
+            card = weighted_draw()
+            add_to_collection(card["name"])
 
-        body = """
-        <div class="hero">
-          <h2>📩 편지가 남겨졌어</h2>
-          <p class="sub">다른 누군가가 이 편지를 읽고 카드를 뽑게 돼.</p>
-        </div>
+            base, emotion_line, special = build_reading(card, item["emotion"])
 
-        <a class="btn" href="/letters/read">익명 편지 읽으러 가기</a>
-        <a class="btn secondary" href="/">메인으로</a>
+            item["status"] = "done"
+            item["selected_slot"] = slot
+            item["card_name"] = card["name"]
+            item["card_keyword"] = card["keyword"]
+            item["card_rarity"] = rarity_label[card["rarity"]]
+            item["reading_base"] = base
+            item["reading_emotion"] = emotion_line
+            item["reading_special"] = special or ""
+
+            session.modified = True
+            return redirect(url_for("reading_result", question_id=question_id))
+
+    cards_html = ""
+    for i in range(1, 7):
+        cards_html += f"""
+        <form method="post">
+          <input type="hidden" name="slot" value="{i}">
+          <button class="tarot-back" type="submit">카드 {i}</button>
+        </form>
         """
-        return page_layout("편지 저장", body)
-
-    body = """
-    <div class="hero">
-      <h2>📮 익명 점괘 편지 보내기</h2>
-      <p class="sub">질문을 남기면 다른 누군가가 카드를 뽑아 보게 되는 구조.</p>
-    </div>
-
-    <div class="card">
-      <form method="post">
-        <label>익명 질문</label>
-        <textarea name="text" placeholder="예: 내가 지금 놓치고 있는 감정은 뭘까?"></textarea>
-        <button type="submit">편지 남기기</button>
-      </form>
-    </div>
-
-    <a class="btn secondary" href="/">메인으로</a>
-    """
-    return page_layout("익명 편지 보내기", body)
-
-
-@app.route("/letters/read")
-def letters_read():
-    ensure_user_data()
-
-    shared = load_shared_data()
-    queue = shared.get("letters", [])
-
-    if queue:
-        item = random.choice(queue)
-        queue.remove(item)
-        shared["letters"] = queue
-        save_shared_data(shared)
-        question = item["text"]
-    else:
-        question = random.choice(npc_letters)
-
-    emotion = random.choice(emotions)
-    card = draw_card()
-    add_to_collection(card["name"])
-
-    base, emotion_line, special = build_reading(card, emotion)
-
-    received = session.get("received", [])
-    received.append({
-        "question": question,
-        "emotion": emotion,
-        "card": card["name"],
-        "keyword": card["keyword"],
-        "rarity": RARITY_ORDER[card["rarity"]],
-        "base": base,
-        "special": special or ""
-    })
-    session["received"] = received
-    session.modified = True
-
-    special_html = f"""
-    <div class="divider"></div>
-    <div class="muted small">특수 해석</div>
-    <p>{special}</p>
-    """ if special else ""
 
     body = f"""
     <div class="hero">
-      <h2>💌 익명의 점괘 편지</h2>
-      <p class="sub">편지를 읽고 카드가 자동으로 뽑혔어. 이 기록은 마법책의 ‘받은 점괘’에 저장돼.</p>
+      <h2>🃏 작업실 카드 선택</h2>
+      <p class="sub">네가 원한 방식 그대로, 카드 1~6 중 한 장을 골라 점괘를 확인하는 구조야.</p>
     </div>
 
     <div class="card">
-      <div class="muted small">누군가의 질문</div>
-      <p>{question}</p>
+      <div class="small">질문</div>
+      <p>{item['question']}</p>
+      <div class="pill">{item['emotion']}</div>
+    </div>
 
-      <div class="muted small">감정 흐름</div>
-      <div class="pill">{emotion}</div>
+    <div class="card">
+      <h3>카드를 골라 줘</h3>
+      <div class="grid6">
+        {cards_html}
+      </div>
+    </div>
+
+    <a class="btn secondary" href="/workroom">작업실로</a>
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("카드 선택", body)
+
+
+@app.route("/reading/<question_id>/result", methods=["GET", "POST"])
+def reading_result(question_id):
+    ensure_data()
+    item = find_question(question_id)
+    if not item or item["status"] != "done":
+        return redirect("/workroom")
+
+    if request.method == "POST":
+        choice = request.form.get("feedback_choice", "").strip()
+        text = request.form.get("feedback_text", "").strip()
+
+        item["feedback_choice"] = choice
+        item["feedback_text"] = text
+
+        feedbacks = session.get("feedbacks", [])
+        exists = False
+        for f in feedbacks:
+            if f["question_id"] == question_id:
+                f["choice"] = choice
+                f["text"] = text
+                exists = True
+                break
+
+        if not exists:
+            feedbacks.append({
+                "question_id": question_id,
+                "question": item["question"],
+                "card_name": item["card_name"],
+                "choice": choice,
+                "text": text
+            })
+
+        session["feedbacks"] = feedbacks
+        session.modified = True
+        return redirect("/book")
+
+    special_html = ""
+    if item["reading_special"]:
+        special_html = f"""
+        <div class="divider"></div>
+        <div class="small">특수 해석</div>
+        <p>{item['reading_special']}</p>
+        """
+
+    body = f"""
+    <div class="hero">
+      <h2>🔮 점괘 결과</h2>
+      <p class="sub">카드를 뽑은 뒤 해석을 확인하고, 아래에 피드백을 남길 수 있어. 이 기록은 마법책으로 들어가.</p>
+    </div>
+
+    <div class="card">
+      <div class="small">질문</div>
+      <p>{item['question']}</p>
+      <div class="pill">{item['emotion']}</div>
 
       <div class="divider"></div>
 
-      <div class="big">{card['name']}</div>
-      <div class="pill">{card['keyword']}</div>
-      <div class="pill">{RARITY_ORDER[card['rarity']]}</div>
+      <div class="small">뽑은 카드</div>
+      <div class="big">{item['card_name']}</div>
+      <div class="pill">{item['card_keyword']}</div>
+      <div class="pill">{item['card_rarity']}</div>
+      <div class="pill">선택한 카드 {item['selected_slot']}</div>
 
       <div class="divider"></div>
-      <div class="muted small">해석</div>
-      <p>{base}</p>
-      <p>{emotion_line}</p>
+
+      <div class="small">해석</div>
+      <p>{item['reading_base']}</p>
+      <p>{item['reading_emotion']}</p>
       {special_html}
     </div>
 
-    <a class="btn" href="/letters/read">다른 편지 읽기</a>
-    <a class="btn secondary" href="/book">마법책 보기</a>
+    <div class="card">
+      <h3>점괘 피드백 남기기</h3>
+      <form method="post">
+        <label>이 점괘가 맞았나요?</label>
+        <select name="feedback_choice">
+          <option value="">선택</option>
+          <option value="맞았어요">맞았어요</option>
+          <option value="애매해요">애매해요</option>
+          <option value="아닌 것 같아요">아닌 것 같아요</option>
+        </select>
+
+        <label style="display:block; margin-top:12px;">코멘트</label>
+        <textarea name="feedback_text" placeholder="왜 그렇게 느꼈는지 적어 줘"></textarea>
+
+        <button type="submit">피드백 저장하기</button>
+      </form>
+    </div>
+
+    <a class="btn secondary" href="/workroom">작업실로</a>
+    <a class="btn ghost" href="/">메인으로</a>
     """
-    return page_layout("익명 편지 읽기", body)
+    return page("점괘 결과", body)
 
 
 @app.route("/book")
 def book():
-    ensure_user_data()
-    today_card = session.get("today_card")
-    sent = session.get("sent", [])
-    received = session.get("received", [])
+    ensure_data()
+    today_card = session["today_card"]
+    questions = session.get("questions", [])
+    feedbacks = session.get("feedbacks", [])
 
     sent_html = ""
-    if sent:
-        for item in reversed(sent):
+    sent_items = [q for q in questions if q["status"] == "done"]
+    if sent_items:
+        for q in reversed(sent_items):
             sent_html += f"""
-            <div class="list-item">
-              <div class="muted small">질문</div>
-              <div>{item['question']}</div>
-              <div class="pill">{item['emotion']}</div>
-              <div class="pill">{item['card']}</div>
+            <div class="item">
+              <div class="small">질문</div>
+              <div>{q['question']}</div>
+              <div class="pill">{q['emotion']}</div>
+              <div class="pill">{q['card_name']}</div>
+              <a class="btn ghost" href="/reading/{q['id']}/result">결과 보기</a>
             </div>
             """
     else:
-        sent_html = '<p class="muted">아직 보낸 점괘가 없어.</p>'
+        sent_html = "<p class='small'>아직 완료된 점괘가 없어.</p>"
 
-    received_html = ""
-    if received:
-        for item in reversed(received):
-            received_html += f"""
-            <div class="list-item">
-              <div class="muted small">편지</div>
-              <div>{item['question']}</div>
-              <div class="pill">{item['emotion']}</div>
-              <div class="pill">{item['card']}</div>
+    feedback_html = ""
+    if feedbacks:
+        for f in reversed(feedbacks):
+            text_html = f"<p>{f['text']}</p>" if f["text"] else ""
+            feedback_html += f"""
+            <div class="item">
+              <div>{f['question']}</div>
+              <div class="pill">{f['card_name']}</div>
+              <div class="pill">{f['choice'] or '선택 안 함'}</div>
+              {text_html}
             </div>
             """
     else:
-        received_html = '<p class="muted">아직 받은 점괘가 없어.</p>'
+        feedback_html = "<p class='small'>아직 저장된 피드백이 없어.</p>"
 
     body = f"""
     <div class="hero">
       <h2>📖 마법책</h2>
-      <p class="sub">유저 감정 기록용 공간. 오늘의 카드, 내가 보낸 점괘, 받은 점괘를 모아 볼 수 있어.</p>
+      <p class="sub">1단계에서는 오늘의 카드, 내가 보낸 점괘, 점괘 피드백 기록으로 세분화돼.</p>
     </div>
 
     <div class="card">
-      <div class="muted small">오늘의 카드</div>
+      <h3>오늘의 카드</h3>
       <div class="big">{today_card['name']}</div>
       <div class="pill">{today_card['keyword']}</div>
+      <div class="pill">{today_card['rarity']}</div>
       <p>{today_card['meaning']}</p>
     </div>
 
@@ -701,56 +745,14 @@ def book():
     </div>
 
     <div class="card">
-      <h3>받은 점괘</h3>
-      {received_html}
+      <h3>점괘 피드백 기록</h3>
+      {feedback_html}
     </div>
 
-    <a class="btn secondary" href="/">메인으로</a>
+    <a class="btn secondary" href="/workroom">작업실로</a>
+    <a class="btn ghost" href="/">메인으로</a>
     """
-    return page_layout("마법책", body)
-
-
-@app.route("/collection", methods=["GET", "POST"])
-def collection():
-    ensure_user_data()
-
-    if request.method == "POST":
-        card = draw_card()
-        add_to_collection(card["name"])
-        return redirect("/collection")
-
-    owned = session.get("collection", [])
-    all_names = [c["name"] for c in cards]
-
-    card_list_html = ""
-    for name in all_names:
-        if name in owned:
-            card_list_html += f'<div class="list-item">🃏 {name}</div>'
-        else:
-            card_list_html += f'<div class="list-item muted">🔒 {name}</div>'
-
-    body = f"""
-    <div class="hero">
-      <h2>🃏 카드 도감</h2>
-      <p class="sub">MVP에서는 22장 카드 수집. 오늘의 카드와 무료 가챠로 획득하는 구조.</p>
-    </div>
-
-    <div class="card">
-      <div class="muted small">카드 도감</div>
-      <div class="counter">{len(owned)} / {len(all_names)}</div>
-      <form method="post">
-        <button type="submit">무료 가챠</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3>보유 카드</h3>
-      {card_list_html}
-    </div>
-
-    <a class="btn secondary" href="/">메인으로</a>
-    """
-    return page_layout("카드 도감", body)
+    return page("마법책", body)
 
 
 if __name__ == "__main__":
