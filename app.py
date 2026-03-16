@@ -388,7 +388,7 @@ def home():
     body = f"""
     <div class="hero">
       <h1>🔮 Witch Connect</h1>
-      <p class="sub">앱을 열면 오늘의 카드가 먼저 주어지고, 점괘를 기록하고, 익명 편지를 읽고, 카드 22장을 수집하는 구조야.</p>
+      <p class="sub">僕と契約して、魔法少女になってほしいんだ</p>
     </div>
 
     <div class="card">
@@ -419,7 +419,7 @@ def today():
     body = f"""
     <div class="hero">
       <h2>🃏 오늘의 카드</h2>
-      <p class="sub">앱을 열면 바로 카드 한 장이 지급되는 구조.</p>
+      <p class="sub">오늘의 점괘는?</p>
     </div>
 
     <div class="card">
@@ -428,7 +428,7 @@ def today():
       <div class="pill">{card['rarity']}</div>
       <p>{card['meaning']}</p>
       <div class="divider"></div>
-      <div class="muted small">이 카드는 마법책과 카드 도감에 자동 저장돼.</div>
+      <div class="muted small">수집 완료.</div>
     </div>
 
     <a class="btn secondary" href="/">메인으로</a>
