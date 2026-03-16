@@ -365,8 +365,7 @@ def home():
 
     body = f"""
     <div class="hero">
-      <h1>🌙 오늘의 카드</h1>
-      <p class="sub">앱에 들어오면 오늘의 카드가 먼저 도착해. 진짜 메인 공간은 작업실이야.</p>
+      <h1>🔮 Witch Connect</h1>
     </div>
 
     <div class="card">
@@ -389,9 +388,6 @@ def home():
     </div>
 
     <a class="btn" href="/workroom">작업실로 들어가기</a>
-    <a class="btn secondary" href="/assistant">검은 고양이</a>
-    <a class="btn secondary" href="/collection">카드 도감</a>
-    <a class="btn secondary" href="/board">게시판</a>
     """
     return page("오늘의 카드", body)
 
