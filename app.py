@@ -617,9 +617,19 @@ def page(title, body):
 @app.route("/")
 def home():
     ensure_data()
-    body = """
+    today_card = session.get("today_card", {})
+
+    body = f"""
     <div class="hero">
       <h1>🔮 Witch Connect</h1>
+    </div>
+
+    <div class="card">
+      <div class="small">오늘의 카드</div>
+      <div class="big">{today_card.get('name', '')}</div>
+      <div class="pill">{today_card.get('keyword', '')}</div>
+      <div class="pill">{today_card.get('rarity', '')}</div>
+      <p>{today_card.get('meaning', '')}</p>
     </div>
 
     <a class="btn" href="/workroom">작업실로 들어가기</a>
