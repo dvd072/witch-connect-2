@@ -96,3 +96,51 @@ rarity_label = {
     "epic": "에픽",
     "legend": "전설"
 }
+
+forest_data = {
+    "name": "사이프러스의 숲",
+    "description": "어딘가 신비로운 기운이 느껴지는 숲이다. 탐험하면 좋은 것을 얻을 수 있을지도......",
+    "items": [
+        {"name": "신선한 허브", "rarity": "normal", "weight": 30},
+        {"name": "아름다운 꽃잎", "rarity": "normal", "weight": 30},
+        {"name": "빛나는 원석", "rarity": "normal", "weight": 30},
+        {"name": "요정의 날개", "rarity": "rare", "weight": 5},
+    ]
+}
+
+forest_special_items = [
+    {"name": "의식용 단검", "rarity": "전리품"}
+]
+
+forest_events = [
+    {
+        "id": "herb_field",
+        "title": "럭키! 신선한 허브가 무성히 자란 공간을 발견했다.",
+        "description": "싱그러운 향기가 퍼지는 풀밭에서 약초를 한가득 모을 수 있을 것 같다.",
+        "type": "bonus_harvest"
+    },
+    {
+        "id": "fairy_whisper",
+        "title": "이건... 바람의 소리? 요정의 속삭임이 들린다...",
+        "description": "숲 깊은 곳에서 희미한 속삭임이 맴돌고, 반짝이는 흔적이 눈앞을 스친다.",
+        "type": "guaranteed_fairy"
+    },
+    {
+        "id": "marybelle_walk",
+        "title": "어? 숲에서 산책하던 메리벨을 만났다.",
+        "description": "메리벨은 잠시 머뭇거리더니 방금 딴 꽃잎이라며 네 손에 올려 주었다.",
+        "type": "marybelle_flower"
+    },
+    {
+        "id": "cat_rescue_preview",
+        "title": "이런, 몬스터가 등장했다! 검은 고양이가 나타나 도와줬다.",
+        "description": "순간 숲의 공기가 날카로워졌지만, 검은 고양이가 네 앞을 막아서며 위험을 흩뜨려 놓았다.",
+        "type": "cat_rescue_preview"
+    },
+    {
+        "id": "ritual_altar",
+        "title": "누군가 의식을 치른 듯한 제단을 발견했다...",
+        "description": "차가운 돌 제단 위에는 오래된 흔적이 남아 있고, 그 곁에 낯선 단검 하나가 놓여 있다.",
+        "type": "ritual_dagger"
+    }
+]
