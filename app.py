@@ -11,8 +11,18 @@ from game_data import (
     cat_talks,
     resident_npc,
     rarity_label,
+    forest_data,
 )
 from shared_store import load_shared_data, save_shared_data
+from forest_system import (
+    ensure_forest_state,
+    reset_forest_run,
+    consume_forest_energy,
+    draw_forest_item,
+    draw_forest_event,
+    generate_forest_scene,
+    resolve_forest_event,
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "witch-connect-integrated-secret")
@@ -168,6 +178,8 @@ def ensure_data():
 
         session["resident_date"] = today
         session.modified = True
+
+    ensure_forest_state(session, today)
 
 
 def page(title, body):
@@ -611,6 +623,7 @@ def home():
     </div>
 
     <a class="btn" href="/workroom">작업실로 들어가기</a>
+    <a class="btn secondary" href="/forest">사이프러스의 숲</a>
     """
     return page("Witch Connect", body)
 
@@ -1971,6 +1984,400 @@ def book():
     <a class="btn ghost" href="/">메인으로</a>
     """
     return page("마법책", body)
+
+
+@app.route("/forest")
+def forest():
+    ensure_data()
+
+    inventory = session.get("forest_inventory", [])
+    treasures = session.get("forest_treasures", [])
+    energy = session.get("forest_energy", 10)
+    max_energy = session.get("forest_max_energy", 10)
+    depth = session.get("forest_depth", 0)
+
+    if not session.get("forest_paths"):
+        generate_forest_scene(session)
+
+    inventory_html = ""
+    if inventory:
+        for item in reversed(inventory[-8:]):
+            inventory_html += f"""
+            <div class="item">
+              <div><strong>{item['name']}</strong></div>
+              <div class="pill">{item['rarity']}</div>
+            </div>
+            """
+    else:
+        inventory_html = "<p class='small'>아직 숲에서 얻은 재료가 없어.</p>"
+
+    treasure_html = ""
+    if treasures:
+        for item in reversed(treasures):
+            treasure_html += f"""
+            <div class="item">
+              <div><strong>{item['name']}</strong></div>
+              <div class="pill">{item['rarity']}</div>
+            </div>
+            """
+    else:
+        treasure_html = "<p class='small'>아직 발견한 전리품이 없어.</p>"
+
+    body = f"""
+    <div class="hero">
+      <h2>🌲 {forest_data['name']}</h2>
+      <p class="sub">{forest_data['description']}</p>
+    </div>
+
+    <div class="card">
+      <div class="pill">현재 깊이 {depth}</div>
+      <div class="pill">행동력 {energy} / {max_energy}</div>
+    </div>
+
+    <div class="card">
+      <h3>숲에서 얻을 수 있는 것</h3>
+      <div class="pill">노멀 · 신선한 허브</div>
+      <div class="pill">노멀 · 아름다운 꽃잎</div>
+      <div class="pill">노멀 · 빛나는 원석</div>
+      <div class="pill">레어 · 요정의 날개</div>
+    </div>
+
+    <div class="card">
+      <h3>숲 입구</h3>
+      <p>{session.get('forest_last_scene', '')}</p>
+      <a class="btn" href="/forest/path">숲 안으로 들어간다</a>
+      <a class="btn secondary" href="/forest/bag">숲 가방 보기</a>
+    </div>
+
+    <div class="card">
+      <h3>최근 획득한 재료</h3>
+      {inventory_html}
+    </div>
+
+    <div class="card">
+      <h3>숲의 전리품</h3>
+      {treasure_html}
+    </div>
+
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("사이프러스의 숲", body)
+
+
+@app.route("/forest/path")
+def forest_path():
+    ensure_data()
+
+    if session.get("forest_energy", 0) <= 0:
+        return redirect(url_for("forest", toast="행동력이 부족해 더 깊게 들어갈 수 없다"))
+
+    if not session.get("forest_paths"):
+        generate_forest_scene(session)
+
+    depth = session.get("forest_depth", 0)
+    scene = session.get("forest_last_scene", "")
+    paths = session.get("forest_paths", [])
+    energy = session.get("forest_energy", 10)
+    max_energy = session.get("forest_max_energy", 10)
+
+    paths_html = ""
+    for p in paths:
+        paths_html += f"""
+        <div class="item">
+          <div class="small">{p['desc']}</div>
+          <a class="btn" href="/forest/move/{p['key']}">{p['label']}</a>
+        </div>
+        """
+
+    body = f"""
+    <div class="hero">
+      <h2>🌲 사이프러스의 숲</h2>
+      <p class="sub">{forest_data['description']}</p>
+    </div>
+
+    <div class="card">
+      <div class="pill">깊이 {depth}</div>
+      <div class="pill">행동력 {energy} / {max_energy}</div>
+      <p>{scene}</p>
+    </div>
+
+    <div class="card">
+      <h3>어느 방향으로 갈까?</h3>
+      {paths_html}
+      <a class="btn secondary" href="/forest/return">숲에서 돌아간다</a>
+    </div>
+
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("사이프러스의 숲", body)
+
+
+@app.route("/forest/move/<direction>")
+def forest_move(direction):
+    ensure_data()
+
+    if direction not in ["left", "forward", "right"]:
+        return redirect("/forest/path")
+
+    if not consume_forest_energy(session, 1):
+        return redirect(url_for("forest", toast="행동력이 부족하다"))
+
+    session["forest_depth"] = session.get("forest_depth", 0) + 1
+
+    session["forest_action_scene"] = {
+        "text": session.get("forest_last_scene", ""),
+        "direction": direction
+    }
+
+    generate_forest_scene(session)
+    session.modified = True
+
+    return redirect("/forest/action")
+
+
+@app.route("/forest/action")
+def forest_action():
+    ensure_data()
+
+    scene = session.get("forest_action_scene")
+    if not scene:
+        return redirect("/forest/path")
+
+    energy = session.get("forest_energy", 10)
+    max_energy = session.get("forest_max_energy", 10)
+    depth = session.get("forest_depth", 0)
+
+    body = f"""
+    <div class="hero">
+      <h2>🌲 사이프러스의 숲</h2>
+      <p class="sub">{forest_data['description']}</p>
+    </div>
+
+    <div class="card">
+      <div class="pill">깊이 {depth}</div>
+      <div class="pill">행동력 {energy} / {max_energy}</div>
+      <p>{scene['text']}</p>
+    </div>
+
+    <div class="card">
+      <h3>어떻게 할까?</h3>
+
+      <a class="btn" href="/forest/action/harvest">채집한다</a>
+      <a class="btn secondary" href="/forest/action/search">주변을 조사한다</a>
+      <a class="btn secondary" href="/forest/action/pass">지나간다</a>
+      <a class="btn ghost" href="/forest/return">숲에서 돌아간다</a>
+    </div>
+    """
+
+    return page("숲 탐험", body)
+
+
+@app.route("/forest/action/harvest")
+def forest_action_harvest():
+    ensure_data()
+
+    if not consume_forest_energy(session, 1):
+        return redirect(url_for("forest", toast="행동력이 부족하다"))
+
+    event = draw_forest_event(session, "harvest")
+
+    if event:
+        resolve_forest_event(session, event)
+        session["forest_action_scene"] = None
+        return redirect("/forest/event")
+
+    found = draw_forest_item(session)
+
+    inventory = session.get("forest_inventory", [])
+    inventory.append({
+        "name": found["name"],
+        "rarity": "레어" if found["rarity"] == "rare" else "노멀"
+    })
+
+    session["forest_inventory"] = inventory
+    session["forest_action_scene"] = None
+    session.modified = True
+
+    return redirect(url_for("forest_found", item_name=found["name"], rarity=found["rarity"]))
+
+
+@app.route("/forest/action/search")
+def forest_action_search():
+    ensure_data()
+
+    if not consume_forest_energy(session, 1):
+        return redirect(url_for("forest", toast="행동력이 부족하다"))
+
+    event = draw_forest_event(session, "search")
+
+    if event:
+        resolve_forest_event(session, event)
+        session["forest_action_scene"] = None
+        return redirect("/forest/event")
+
+    found = draw_forest_item(session)
+
+    inventory = session.get("forest_inventory", [])
+    inventory.append({
+        "name": found["name"],
+        "rarity": "레어" if found["rarity"] == "rare" else "노멀"
+    })
+
+    session["forest_inventory"] = inventory
+    session["forest_action_scene"] = None
+    session.modified = True
+
+    return redirect(url_for("forest_found", item_name=found["name"], rarity=found["rarity"]))
+
+
+@app.route("/forest/action/pass")
+def forest_action_pass():
+    ensure_data()
+
+    if not consume_forest_energy(session, 1):
+        return redirect(url_for("forest", toast="행동력이 부족하다"))
+
+    generate_forest_scene(session)
+    session["forest_action_scene"] = None
+    session.modified = True
+
+    return redirect("/forest/path")
+
+
+@app.route("/forest/found")
+def forest_found():
+    ensure_data()
+
+    item_name = request.args.get("item_name", "")
+    rarity = request.args.get("rarity", "normal")
+
+    rarity_text = "레어" if rarity == "rare" else "노멀"
+
+    body = f"""
+    <div class="hero">
+      <h2>✨ 숲에서 발견한 것</h2>
+      <p class="sub">사이프러스의 숲을 걷던 중 무언가를 발견했다.</p>
+    </div>
+
+    <div class="card">
+      <div class="small">획득 재료</div>
+      <div class="big">{item_name}</div>
+      <div class="pill">{rarity_text}</div>
+    </div>
+
+    <a class="btn" href="/forest/path">계속 탐험하기</a>
+    <a class="btn secondary" href="/forest/return">숲에서 돌아간다</a>
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("숲 발견", body)
+
+
+@app.route("/forest/event")
+def forest_event():
+    ensure_data()
+
+    event = session.get("forest_last_event")
+    if not event:
+        return redirect("/forest/path")
+
+    rewards_html = ""
+    for reward in event["rewards"]:
+        rewards_html += f"""
+        <div class="item">
+          <div><strong>{reward['name']}</strong></div>
+          <div class="pill">{reward['rarity']}</div>
+        </div>
+        """
+
+    body = f"""
+    <div class="hero">
+      <h2>🌲 숲의 사건</h2>
+      <p class="sub">사이프러스의 숲은 가끔 예상하지 못한 장면을 보여 준다.</p>
+    </div>
+
+    <div class="card">
+      <div class="big">{event['title']}</div>
+      <p>{event['description']}</p>
+    </div>
+
+    <div class="card">
+      <h3>획득 / 발생</h3>
+      {rewards_html}
+    </div>
+
+    <a class="btn" href="/forest/path">계속 탐험하기</a>
+    <a class="btn secondary" href="/forest/return">숲에서 돌아간다</a>
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("숲 이벤트", body)
+
+
+@app.route("/forest/bag")
+def forest_bag():
+    ensure_data()
+
+    inventory = session.get("forest_inventory", [])
+    treasures = session.get("forest_treasures", [])
+
+    item_counts = {}
+    for item in inventory:
+        key = item["name"]
+        if key not in item_counts:
+            item_counts[key] = {"count": 0, "rarity": item["rarity"]}
+        item_counts[key]["count"] += 1
+
+    items_html = ""
+    if item_counts:
+        for name, data in item_counts.items():
+            items_html += f"""
+            <div class="item">
+              <div><strong>{name}</strong></div>
+              <div class="pill">{data['rarity']}</div>
+              <div class="small">x{data['count']}</div>
+            </div>
+            """
+    else:
+        items_html = "<p class='small'>아직 모은 재료가 없어.</p>"
+
+    treasure_html = ""
+    if treasures:
+        for item in treasures:
+            treasure_html += f"""
+            <div class="item">
+              <div><strong>{item['name']}</strong></div>
+              <div class="pill">{item['rarity']}</div>
+            </div>
+            """
+    else:
+        treasure_html = "<p class='small'>아직 발견한 전리품이 없어.</p>"
+
+    body = f"""
+    <div class="hero">
+      <h2>🎒 숲 가방</h2>
+      <p class="sub">사이프러스의 숲에서 발견한 재료와 전리품을 정리해 둔 공간이다.</p>
+    </div>
+
+    <div class="card">
+      <h3>재료</h3>
+      {items_html}
+    </div>
+
+    <div class="card">
+      <h3>전리품</h3>
+      {treasure_html}
+    </div>
+
+    <a class="btn secondary" href="/forest">숲으로</a>
+    <a class="btn ghost" href="/">메인으로</a>
+    """
+    return page("숲 가방", body)
+
+
+@app.route("/forest/return")
+def forest_return():
+    ensure_data()
+    reset_forest_run(session)
+    return redirect(url_for("forest", toast="사이프러스의 숲에서 돌아왔다"))
 
 
 if __name__ == "__main__":
